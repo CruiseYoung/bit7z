@@ -275,9 +275,8 @@ auto widen( const std::string& narrowString ) -> std::wstring {
                          wideStringSize );
     return result;
 #else
-    const std::size_t narrowSize = narrowString.size();
     std::wstring result;
-    result.reserve( narrowSize );
+    result.reserve( narrowString.size() );
     for ( auto it = narrowString.cbegin(); it != narrowString.cend(); ) {
         const char32_t utf32char = decodeCodepoint( it, narrowString.cend() );
         toUtf16( utf32char, result );
