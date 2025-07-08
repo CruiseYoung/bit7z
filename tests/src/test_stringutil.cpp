@@ -199,6 +199,59 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
 
 #endif
 
+TEST_CASE( "util: starts_with", "[stringutil][starts_with]" ) {
+    using bit7z::starts_with;
+    using bit7z::tstring;
+
+    const tstring emptyTestString;
+    REQUIRE( starts_with( emptyTestString, BIT7Z_STRING( "" ) ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, BIT7Z_STRING( " " ) ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, BIT7Z_STRING( "h" ) ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, BIT7Z_STRING( "hello world!" ) ) );
+    REQUIRE( starts_with( emptyTestString, tstring{ BIT7Z_STRING( "" ) } ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, tstring{ BIT7Z_STRING( " " ) } ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, tstring{ BIT7Z_STRING( "h" ) } ) );
+    REQUIRE_FALSE( starts_with( emptyTestString, tstring{ BIT7Z_STRING( "hello world!" ) } ) );
+
+    const tstring oneCharTestString{ BIT7Z_STRING( "a" ) };
+    REQUIRE( starts_with( oneCharTestString, BIT7Z_STRING( "" ) ) );
+    REQUIRE( starts_with( oneCharTestString, BIT7Z_STRING( "a" ) ) );
+    REQUIRE_FALSE( starts_with( oneCharTestString, BIT7Z_STRING( "h" ) ) );
+    REQUIRE_FALSE( starts_with( oneCharTestString, BIT7Z_STRING( "hello world!" ) ) );
+    REQUIRE( starts_with( oneCharTestString, tstring{ BIT7Z_STRING( "" ) } ) );
+    REQUIRE( starts_with( oneCharTestString, tstring{ BIT7Z_STRING( "a" ) } ) );
+    REQUIRE_FALSE( starts_with( oneCharTestString, tstring{ BIT7Z_STRING( "h" ) } ) );
+    REQUIRE_FALSE( starts_with( oneCharTestString, tstring{ BIT7Z_STRING( "hello world!" ) } ) );
+
+    const tstring testString{ BIT7Z_STRING( "hello world!" ) };
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "a" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "h" ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "b!" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "hello" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "hello " ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "oworld!" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "hello world" ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "Hello World!" ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "hello world, hello world!" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "" ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( "!" ) ) );
+    REQUIRE_FALSE( starts_with( testString, BIT7Z_STRING( " world!" ) ) );
+    REQUIRE( starts_with( testString, BIT7Z_STRING( "hello world!" ) ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "a" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "h" ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "b!" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "hello" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "hello " ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "oworld!" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "hello world" ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "Hello World!" ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "hello world, hello world!" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "" ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( "!" ) } ) );
+    REQUIRE_FALSE( starts_with( testString, tstring{ BIT7Z_STRING( " world!" ) } ) );
+    REQUIRE( starts_with( testString, tstring{ BIT7Z_STRING( "hello world!" ) } ) );
+}
+
 TEST_CASE( "util: ends_with", "[stringutil][ends_with]" ) {
     using bit7z::ends_with;
     using bit7z::tstring;
