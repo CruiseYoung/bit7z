@@ -282,8 +282,6 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
             std::make_tuple( "\xED\xAA\x80""A\xC3\xA9", L"\uFFFD""A\xE9" ),
             // Invalid surrogate at the end of the string.
             std::make_tuple( "\xC3\xA9""A\xED\xAA\x80", L"\xE9""A\uFFFD" ),
-            // Codepoint outside Unicode specification.
-            std::make_tuple( "\xF4\x90\x80\x80", L"\uFFFD" )
         } ) );
 
         DYNAMIC_SECTION( "Converting \"" << toHexString( testInput, false ) << "\" to wide string" ) {
@@ -527,7 +525,16 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
                 std::make_tuple( "\U00010000", L"\xD800\xDC00" ),
                 std::make_tuple( "\U00010001", L"\xD800\xDC01" ),
                 std::make_tuple( "\U0010FFFE", L"\xDBFF\xDFFE" ),
-                std::make_tuple( "\U0010FFFF", L"\xDBFF\xDFFF" )
+                std::make_tuple( "\U0010FFFF", L"\xDBFF\xDFFF" ),
+                // Codepoint outside Unicode range specification.
+                std::make_tuple( "\xF4\x90\x80\x80", L"\uFFFD" ), // U+110000
+                std::make_tuple( "\xF4\x90\x80\x81", L"\uFFFD" ), // U+110001
+                std::make_tuple( "\xF7\xBF\xBF\xBF", L"\uFFFD" ), // U+001FFFFF
+                std::make_tuple( "\xF8\x88\x80\x80\x80", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ), // U+00200000
+                std::make_tuple( "\xFB\xBF\xBF\xBF\xBF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ), // U+03FFFFFF
+                std::make_tuple( "\xFC\x84\x80\x80\x80\x80", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ), // U+04000000
+                std::make_tuple( "\xFD\xBF\xBF\xBF\xBF\xBF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ), // U+7FFFFFFF
+                std::make_tuple( "\xFE\xBF\xBF\xBF\xBF\xBF\xBF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" )
             }
         ) );
 
