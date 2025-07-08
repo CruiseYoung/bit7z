@@ -23,11 +23,26 @@
 #define NARROWING_TEST_STR( str ) std::make_tuple( L##str, (str) )
 
 namespace {
-auto toHexString( const std::wstring& str ) -> std::string {
+BIT7Z_ALWAYS_INLINE
+auto toCodeunit( char character ) noexcept -> std::uint8_t {
+    return static_cast< std::uint8_t >( character );
+}
+
+BIT7Z_ALWAYS_INLINE
+auto toCodeunit( wchar_t character ) noexcept -> std::uint32_t {
+    return static_cast< std::uint32_t >( character );
+}
+
+template<typename CharT>
+auto toHexString( const std::basic_string<CharT>& str, bool keepAscii = true ) -> std::string {
     std::ostringstream oss;
     oss << std::hex;
-    for ( const wchar_t character : str ) {
-        oss << "\\x" << std::uppercase << static_cast< std::uint32_t >( character ) << std::nouppercase;
+    for ( const CharT character : str ) {
+        if ( keepAscii && character < 0x7Fu ) {
+            oss << static_cast< char >( character );
+        } else {
+            oss << "\\x" << std::uppercase << +toCodeunit( character ) << std::nouppercase;
+        }
     }
     return oss.str();
 }
@@ -96,7 +111,11 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
             NARROWING_TEST_STR( "supercalifragilistichespiralidoso" ),
             NARROWING_TEST_STR( "ABC" ),
             NARROWING_TEST_STR( "perché" ),
-            NARROWING_TEST_STR( "\u4E2D" ), // 中
+            NARROWING_TEST_STR( "κόσμε" ),
+            NARROWING_TEST_STR( "\u0080" ),
+            NARROWING_TEST_STR( "\u0800" ), // U+0800
+            NARROWING_TEST_STR( "\u4E08" ), // 丈
+            NARROWING_TEST_STR( "\U00010000" ),
             NARROWING_TEST_STR( "\u4E16\u754C" ), // 世界
             NARROWING_TEST_STR( "\u30e1\u30bf\u30eb\u30ac\u30eb\u30eb\u30e2\u30f3" ), // メタルガルルモン
             NARROWING_TEST_STR( "English, \u65E5\u672C\u8A9E, \uD55C\uAD6D\uC5B4, "
@@ -120,7 +139,7 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
             std::make_tuple( L"\xD852\xDF62", "\xF0\xA4\xAD\xA2" ),
             // Mixed characters: Aé中😂
             std::make_tuple( L"A\x00E9\x4E2D\xD83D\xDE02", "A\xC3\xA9\xE4\xB8\xAD\xF0\x9F\x98\x82" ),
-            // Mixed characters: Hello 世界😊!
+            // Mixed characters: Hello 世界 😊!
             std::make_tuple( L"Hello \x4E16\x754C \xD83D\xDE0A!", "Hello \xE4\xB8\x96\xE7\x95\x8C \xF0\x9F\x98\x8A!" ),
             // Mixed special characters: ¡§©®™𝄞€£¥»¿
             std::make_tuple( L"\xA1\xA7\xA9\xAE\x2122\xD834\xDD1E\x20AC\xA3\xA5\xBB\xBF",
@@ -178,22 +197,343 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
     using bit7z::widen;
     using std::make_tuple;
 
-    std::string testInput;
-    std::wstring testOutput;
-    std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >(
-        {
-            WIDENING_TEST_STR( "" ),
-            WIDENING_TEST_STR( "h" ),
-            WIDENING_TEST_STR( "Hello, World!" ),
-            WIDENING_TEST_STR( "supercalifragilistichespiralidoso" ),
-            WIDENING_TEST_STR( "ABC" ),
-            WIDENING_TEST_STR( "perché" ),
-            WIDENING_TEST_STR( "\u30e1\u30bf\u30eb\u30ac\u30eb\u30eb\u30e2\u30f3" ) // メタルガルルモン
-        }
-    ) );
+#ifndef _WIN32
+    SECTION( "UTF-8 strings containing byte sequences encoding UTF-16 surrogates are invalid" ) {
+        const std::string testInput = GENERATE(
+            "\xED\xA0\x80", // Lone high surrogates (invalid both in UTF-8 and UTF-16).
+            "\xED\xA0\x81",
+            "\xED\xA0\xBD",
+            "\xED\xAA\x80",
+            "\xED\xAF\xBE",
+            "\xED\xAF\xBF",
+            "\xED\xB0\x80", // Lone low surrogates (invalid both in UTF-8 and UTF-16).
+            "\xED\xB0\x81",
+            "\xED\xB2\x80",
+            "\xED\xB8\x82",
+            "\xED\xBF\xBE",
+            "\xED\xBF\xBF"
+        );
 
-    DYNAMIC_SECTION( "Converting \"" << testInput << "\" to wide string" ) {
-        REQUIRE( widen( testInput ) == testOutput );
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
+            const std::wstring testOutput = widen( testInput );
+            REQUIRE( testOutput == L"\uFFFD" );
+            REQUIRE( widen( "prefix" + testInput ) == L"prefix" + testOutput );
+            REQUIRE( widen( testInput + "suffix" ) == testOutput + L"suffix" );
+            REQUIRE( widen( "prefix" + testInput + "suffix" ) == L"prefix" + testOutput + L"suffix" );
+        }
+    }
+
+    SECTION( "Converting UTF-8 strings containing invalid byte sequences" ) {
+        std::string testInput;
+        std::wstring testOutput;
+
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >( {
+            // Invalid UTF-8 bytes.
+            std::make_tuple( "\xC0", L"\uFFFD" ),
+            std::make_tuple( "\xC1", L"\uFFFD" ),
+            std::make_tuple( "\xF5", L"\uFFFD" ),
+            std::make_tuple( "\xF6", L"\uFFFD" ),
+            std::make_tuple( "\xF7", L"\uFFFD" ),
+            std::make_tuple( "\xF8", L"\uFFFD" ),
+            std::make_tuple( "\xF9", L"\uFFFD" ),
+            std::make_tuple( "\xFA", L"\uFFFD" ),
+            std::make_tuple( "\xFB", L"\uFFFD" ),
+            std::make_tuple( "\xFC", L"\uFFFD" ),
+            std::make_tuple( "\xFD", L"\uFFFD" ),
+            std::make_tuple( "\xFE", L"\uFFFD" ),
+            std::make_tuple( "\xFF", L"\uFFFD" ),
+            // Surrogate pairs (invalid in UTF-8, but not in UTF-16).
+            std::make_tuple( "\xED\xA0\x80\xED\xB1\x82", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xED\xA0\xBD\xED\xB8\x82", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xED\xA1\x92\xED\xBD\xA2", L"\uFFFD\uFFFD" ),
+            // Invalid continuation bytes.
+            std::make_tuple( "\xC3\x28", L"\uFFFD\x28" ),
+            std::make_tuple( "\xC3\xE8", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xFF", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x28", L"\uFFFD\x28" ),
+            std::make_tuple( "\xE2\x28\xA1", L"\uFFFD\x28\uFFFD" ),
+            std::make_tuple( "\xE2\x82\x28", L"\uFFFD\x28" ),
+            std::make_tuple( "\xE2\xC3\xA1", L"\uFFFD\xE1" ),
+            std::make_tuple( "\xE2\x82\xC3", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xE8\xA1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x82\xE8", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xFF\xA1", L"\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x82\xFF", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x28\xE2\x28", L"\uFFFD\x28\uFFFD\x28" ),
+            std::make_tuple( "\xF0\x28\x8C\xBC", L"\uFFFD\x28\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x28\xBC", L"\uFFFD\x28\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x8C\x28", L"\uFFFD\x28" ),
+            std::make_tuple( "\xF0\xC3\x8C\xBC", L"\uFFFD\xCC\uFFFD" ),
+            std::make_tuple( "\xF0\x80\xC3\xBC", L"\uFFFD\xFC" ),
+            std::make_tuple( "\xF0\x80\x8C\xC3", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xE8\x8C\xBC", L"\uFFFD\u833C" ),
+            std::make_tuple( "\xF0\x80\xE8\xBC", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x8C\xE8", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xFF\x8C\xBC", L"\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\xFF\xBC", L"\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x8C\xFF", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x28\x8C\xBC\xFF", L"\uFFFD\x28\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xC3\xE2\xF0", L"\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            // Invalid leading byte.
+            std::make_tuple( "\x80", L"\uFFFD" ),
+            std::make_tuple( "\x80\x81", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF5\x41", L"\uFFFD\x41" ),
+            // Invalid surrogate at the start of the string.
+            std::make_tuple( "\xED\xAA\x80""A\xC3\xA9", L"\uFFFD""A\xE9" ),
+            // Invalid surrogate at the end of the string.
+            std::make_tuple( "\xC3\xA9""A\xED\xAA\x80", L"\xE9""A\uFFFD" ),
+            // Codepoint outside Unicode specification.
+            std::make_tuple( "\xF4\x90\x80\x80", L"\uFFFD" )
+        } ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput, false ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+            REQUIRE( widen( "prefix" + testInput ) == L"prefix" + testOutput );
+            REQUIRE( widen( testInput + "suffix" ) == testOutput + L"suffix" );
+            REQUIRE( widen( "prefix" + testInput + "suffix" ) == L"prefix" + testOutput + L"suffix" );
+        }
+    }
+
+    SECTION( "Converting UTF-8 strings containing truncated sequences" ) {
+        std::string testInput;
+        std::wstring testOutput;
+
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >( {
+            // Truncated 2-bytes sequences.
+            std::make_tuple( "\xC3", L"\uFFFD" ),
+            std::make_tuple( "\xC3\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xC3\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xC2", L"\uFFFD\uFFFD" ), // + another truncated 2-bytes sequence.
+            std::make_tuple( "\xC3\xC2\xA0", L"\uFFFD\xA0" ), // + a valid 2-bytes sequence.
+            std::make_tuple( "\xC3\xE2", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xC3\xE2\x81", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xE2\x81\x82", L"\uFFFD\u2042" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xC3\xF0", L"\uFFFD\uFFFD" ), // + a truncated 4-bytes sequence.
+            std::make_tuple( "\xC3\xF0\x90", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xF0\x90\x8D", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xC3\xF0\x90\x8D\x88", L"\uFFFD\xD800\xDF48" ), // + a valid 4-bytes sequence.
+            // Truncated 3-bytes sequences.
+            std::make_tuple( "\xE2", L"\uFFFD" ),
+            std::make_tuple( "\xE2\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xE2\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xC3", L"\uFFFD\uFFFD" ), // + a truncated 2-bytes sequence.
+            std::make_tuple( "\xE2\xC3\xA9", L"\uFFFD\xE9" ), // + a valid 2-bytes sequence.
+            std::make_tuple( "\xE2\xE4", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xE2\xE4\x82", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xE4\x82\x96", L"\uFFFD\u4096" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xE2\xF0", L"\uFFFD\uFFFD" ), // + a truncated 4-bytes sequence.
+            std::make_tuple( "\xE2\xF0\x90", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xF0\x90\x8D", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\xF0\x90\x8D\x88", L"\uFFFD\xD800\xDF48" ), // + a valid 4-bytes sequence (𐍈, U+10348).
+            std::make_tuple( "\xE2\x81", L"\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xE2\x81\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xC3", L"\uFFFD\uFFFD" ), // + a truncated 2-bytes sequence.
+            std::make_tuple( "\xE2\x81\xC3\xA9", L"\uFFFD\xE9" ), // + a valid 2-bytes sequence.
+            std::make_tuple( "\xE2\x81\xE4", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xE2\x81\xE4\x82", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xE4\x82\x96", L"\uFFFD\u4096" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xE2\x81\xF0", L"\uFFFD\uFFFD" ), // + a truncated 4-bytes sequence.
+            std::make_tuple( "\xE2\x81\xF0\x90", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xF0\x90\x8D", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE2\x81\xF0\x90\x8D\x88", L"\uFFFD\xD800\xDF48" ), // + a valid 4-bytes sequence (𐍈, U+10348).
+            // Truncated 4-bytes sequences.
+            std::make_tuple( "\xF0", L"\uFFFD" ),
+            std::make_tuple( "\xF0\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xF0\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xD0", L"\uFFFD\uFFFD" ), // + a truncated 2-bytes sequence.
+            std::make_tuple( "\xF0\xD0\x80", L"\uFFFD\u0400" ), // + a valid 2-bytes sequence (U+0400).
+            std::make_tuple( "\xF0\xE0", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xF0\xE0\xB8", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xE0\xB8\xA1", L"\uFFFD\u0E21" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xF0\xF3", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xF3\xA0", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xF3\xA0\x80", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\xF3\xA0\x80\xA2", L"\uFFFD\xDB40\xDC22" ), // + a valid 4-bytes sequence (U+E0022).
+            std::make_tuple( "\xF0\x90", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xF0\x90\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xC4", L"\uFFFD\uFFFD" ), // + a truncated 2-bytes sequence.
+            std::make_tuple( "\xF0\x90\xC4\xA7", L"\uFFFD\u0127" ), // + a valid 2-bytes sequence (U+0127).
+            std::make_tuple( "\xF0\x90\xE1", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xF0\x90\xE1\x82", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xE1\x82\xB4", L"\uFFFD\u10B4" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xF0\x90\xF0", L"\uFFFD\uFFFD" ), // + a truncated 4-bytes sequence.
+            std::make_tuple( "\xF0\x90\xF0\x90", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xF0\x90\x8D", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\xF0\x90\x8D\x88", L"\uFFFD\xD800\xDF48" ), // + a valid 4-bytes sequence (𐍈, U+10348).
+            std::make_tuple( "\xF0\x90\x8D", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xC0", L"\uFFFD\uFFFD" ), // + invalid UTF-8 byte.
+            std::make_tuple( "\xF0\x90\x8D\xC1", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xF5", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xC6", L"\uFFFD\uFFFD" ), // + a truncated 2-bytes sequence.
+            std::make_tuple( "\xF0\x90\x8D\xC6\x90", L"\uFFFD\u0190" ), // + a valid 2-bytes sequence (U+0400).
+            std::make_tuple( "\xF0\x90\x8D\xEA", L"\uFFFD\uFFFD" ), // + a truncated 3-bytes sequence.
+            std::make_tuple( "\xF0\x90\x8D\xEA\xA7", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xEA\xA7\x9E", L"\uFFFD\uA9DE" ), // + a valid 3-bytes sequence.
+            std::make_tuple( "\xF0\x90\x8D\xF0", L"\uFFFD\uFFFD" ), // + a truncated 4-bytes sequence.
+            std::make_tuple( "\xF0\x90\x8D\xF0\x90", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xF0\x90\x8D", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x90\x8D\xF0\x90\x8D\x88", L"\uFFFD\xD800\xDF48" ), // + a valid 4-bytes sequence (𐍈, U+10348).
+            // Sequence of 10 truncated sequences.
+            std::make_tuple( "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD"
+                             "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD",
+                             L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD")
+        } ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput, false ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+            REQUIRE( widen( "prefix" + testInput ) == L"prefix" + testOutput );
+            REQUIRE( widen( testInput + "suffix" ) == testOutput + L"suffix" );
+            REQUIRE( widen( "prefix" + testInput + "suffix" ) == L"prefix" + testOutput + L"suffix" );
+        }
+    }
+
+    SECTION( "Converting UTF-8 strings containing overlong sequences" ) {
+        std::string testInput;
+        std::wstring testOutput;
+
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >( {
+            // Overlong 2-Byte sequences.
+            std::make_tuple( "\xC0\x80", L"\uFFFD" ),
+            std::make_tuple( "\xC0\xA0", L"\uFFFD" ),
+            std::make_tuple( "\xC0\xAF", L"\uFFFD" ),
+            std::make_tuple( "\xC0\xB9", L"\uFFFD" ),
+            std::make_tuple( "\xC0\xBF", L"\uFFFD" ),
+            std::make_tuple( "\xC1\x81", L"\uFFFD" ),
+            std::make_tuple( "\xC1\x9A", L"\uFFFD" ),
+            std::make_tuple( "\xC1\xA1", L"\uFFFD" ),
+            std::make_tuple( "\xC1\xBE", L"\uFFFD" ),
+            std::make_tuple( "\xC1\xBF", L"\uFFFD" ),
+            // Overlong 3-Byte sequences.
+            std::make_tuple( "\xE0\x80\x80", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x80\xA0", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x80\xAF", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x80\xB9", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x80\xBF", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x81\x81", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x81\x9A", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x81\xA1", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x81\xBE", L"\uFFFD" ),
+            std::make_tuple( "\xE0\x82\xA2", L"\uFFFD" ), // Overlong sequence for non-ASCII character U+00A2.
+            std::make_tuple( "\xE0\x9F\xBF", L"\uFFFD" ),
+            // Overlong 4-Byte sequences.
+            std::make_tuple( "\xF0\x80\x80\x80", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\xA0", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\xAF", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\xB9", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\xBF", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x81\x81", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x81\x9A", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x81\xA1", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x81\xBE", L"\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x82\xA2", L"\uFFFD" ), // Overlong sequence for non-ASCII character U+00A2.
+            std::make_tuple( "\xF0\x82\x82\xAC", L"\uFFFD" ), // Overlong sequence for non-ASCII character U+20AC (€).
+            std::make_tuple( "\xF0\x8F\xBF\xBF", L"\uFFFD" ),
+            // Overlong 5-Byte sequences.
+            std::make_tuple( "\xF8\x80\x80\x80\x80", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF8\x80\x80\x80\xA0", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF8\x80\x80\x80\xAF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF8\x87\xBF\xBF\xB9", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF8\x87\xBF\xBF\xBF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            // Overlong 6-Byte sequences.
+            std::make_tuple( "\xFC\x80\x80\x80\x80\x80", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xFC\x80\x80\x80\x80\xAF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xFC\x83\xBF\xBF\xBF\xBF", L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            // Multiple overlong sequences.
+            std::make_tuple( "\xC0\x80\xC0\x80", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xE0\x80\x80\xE0\x80\x80", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\x80\xF0\x80\x80\x80", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF8\x80\x80\x80\x80\xF8\x80\x80\x80\x80",
+                             L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            std::make_tuple( "\xFC\x80\x80\x80\x80\x80\xFC\x80\x80\x80\x80\x80",
+                             L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" ),
+            // Multiple mixed overlong sequences.
+            std::make_tuple( "\xC0\x80\xE0\x80\x80", L"\uFFFD\uFFFD" ),
+            std::make_tuple( "\xF0\x80\x80\x80\xF8\x80\x80\x80\x80\xF8\x80\x80\x80\x80",
+                             L"\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD" )
+        } ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput, false ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+            REQUIRE( widen( "prefix" + testInput ) == L"prefix" + testOutput );
+            REQUIRE( widen( testInput + "suffix" ) == testOutput + L"suffix" );
+            REQUIRE( widen( "prefix" + testInput + "suffix" ) == L"prefix" + testOutput + L"suffix" );
+        }
+    }
+#endif
+
+    SECTION( "Valid UTF-8 strings" ) {
+        std::string testInput;
+        std::wstring testOutput;
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >(
+            {
+                WIDENING_TEST_STR( "" ),
+                WIDENING_TEST_STR( "h" ),
+                WIDENING_TEST_STR( "Hello, World!" ),
+                WIDENING_TEST_STR( "supercalifragilistichespiralidoso" ),
+                WIDENING_TEST_STR( "ABC" ),
+                WIDENING_TEST_STR( "perché" ),
+                WIDENING_TEST_STR( "κόσμε" ),
+                WIDENING_TEST_STR( "\u2010" ), // Hyphen ‐
+                WIDENING_TEST_STR( "\u4E08" ), // 丈
+                WIDENING_TEST_STR( "\u4E16\u754C" ), // 世界
+                WIDENING_TEST_STR( "\uE000" ),
+                WIDENING_TEST_STR( "\uFFFD" ), // Replacement character U+FFFD
+                WIDENING_TEST_STR( "\u30e1\u30bf\u30eb\u30ac\u30eb\u30eb\u30e2\u30f3" ), // メタルガルルモン
+                std::make_tuple( "A\u00E9\u4E2D\U0001F602", L"A\u00E9\u4E2D\xD83D\xDE02" ), // Aé中😂
+                std::make_tuple( "Hello \u4E16\u754C \U0001F60A!", L"Hello \u4E16\u754C \xD83D\xDE0A!" ), // Hello 世界 😊!
+                std::make_tuple( "\u00A1\u00A7\u00A9\u00AE\u2122\U0001D11E\u20AC\u00A3\u00A5\u00BB\u00BF", // ¡§©®™𝄞€£¥»¿
+                                 L"\u00A1\u00A7\u00A9\u00AE\u2122\xD834\xDD1E\u20AC\u00A3\u00A5\u00BB\u00BF" )
+            }
+        ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+        }
+    }
+
+    SECTION( "Boundary value analysis" ) {
+        std::string testInput;
+        std::wstring testOutput;
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >(
+            {
+                // ASCII range U+0000 ... U+007F
+                WIDENING_TEST_STR( "\u0000" ), // NUL
+                WIDENING_TEST_STR( "\u0001" ), // SOH
+                WIDENING_TEST_STR( "\u007E" ), // Tilde ~
+                WIDENING_TEST_STR( "\u007F" ), // DEL
+                // 2-bytes UTF-8 range U+0080 ... U+07FF
+                WIDENING_TEST_STR( "\u0080" ), // PAD
+                WIDENING_TEST_STR( "\u0081" ), // HOP
+                WIDENING_TEST_STR( "\u07FE" ),
+                WIDENING_TEST_STR( "\u07FF" ),
+                // 3-bytes UTF-8 range U+0800 ... U+FFFF
+                WIDENING_TEST_STR( "\u0800" ),
+                WIDENING_TEST_STR( "\u0801" ),
+                WIDENING_TEST_STR( "\uD7FE" ),
+                WIDENING_TEST_STR( "\uD7FF" ),
+                // The surrogate range [U+D800, U+DFFF] is tested in a separate section.
+                WIDENING_TEST_STR( "\uF000" ),
+                WIDENING_TEST_STR( "\uF001" ),
+                WIDENING_TEST_STR( "\uFFFE" ),
+                WIDENING_TEST_STR( "\uFFFF" ),
+                // 4-bytes UTF-8 range U+10000 ... U+10FFFF
+                std::make_tuple( "\U00010000", L"\xD800\xDC00" ),
+                std::make_tuple( "\U00010001", L"\xD800\xDC01" ),
+                std::make_tuple( "\U0010FFFE", L"\xDBFF\xDFFE" ),
+                std::make_tuple( "\U0010FFFF", L"\xDBFF\xDFFF" )
+            }
+        ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+        }
     }
 }
 
