@@ -2,10 +2,6 @@
 
 <h3 align="center">A C++ static library offering a clean and simple interface to the 7-Zip shared libraries.</h3>
 
-**A C++ static library offering a clean and simple interface to the 7-zip shared libraries.**
-
-</div>
-
 <!-- navbar -->
 
 <p align="center">
@@ -354,6 +350,7 @@ If you plan to use the `7z.so` from p7zip or 7-Zip v22.01 and earlier instead, y
 
 <details>
   <summary>Expand for more details</summary>
+
 _On Linux and macOS_, 7-Zip v23.01 introduced breaking changes to the IUnknown interface.
 As a result, if you build bit7z for such a version of 7-Zip (the default), it will not support using the shared libraries from previous versions of 7-Zip (or from p7zip).
 Conversely, bit7z made for earlier versions of 7-Zip or for p7zip is incompatible with the shared libraries from 7-Zip v23.01 and later.
