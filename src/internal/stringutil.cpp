@@ -146,9 +146,14 @@ constexpr std::array<std::uint8_t, 32> utfSizes = {
 };
 
 BIT7Z_ALWAYS_INLINE
+constexpr auto byteSequenceSize( std::uint8_t leadingByte ) noexcept -> std::uint8_t {
+    return utfSizes[ static_cast< std::uint8_t >( leadingByte >> 3u ) ];
+}
+
+BIT7Z_ALWAYS_INLINE
 constexpr auto isLeadingByte( std::uint8_t byte ) noexcept -> bool {
     // byte <= 0x7Fu || ( byte & 0xE0u ) == 0xC0u || ( byte & 0xF0u ) == 0xE0u || ( byte & 0xF8u ) == 0xF0u;
-    return utfSizes[ byte >> 3u ] != 0;
+    return byteSequenceSize( byte ) != 0;
 }
 
 constexpr std::array<std::uint8_t, 5> utfLeadMasks = {
@@ -173,7 +178,7 @@ auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_
         return kReplacementChar;
     }
 
-    const auto sequenceSize = utfSizes[ leadingByte >> 3u ]; // NOLINT(*-pro-bounds-constant-array-index)
+    const auto sequenceSize = byteSequenceSize( leadingByte ); // NOLINT(*-pro-bounds-constant-array-index)
     const auto leadMask = utfLeadMasks[ sequenceSize ]; // NOLINT(*-pro-bounds-constant-array-index)
 
     // Recreating the codepoint from the UTF-8 byte sequence.
