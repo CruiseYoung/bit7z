@@ -21,24 +21,11 @@
 #define CODEPAGE CP_UTF8
 #define CODEPAGE_WC_FLAGS 0
 #endif
-#else
-#ifndef BIT7Z_USE_STANDARD_FILESYSTEM
-// GCC 4.9 doesn't have the <codecvt> header; as a workaround,
-// we use GHC filesystem's utility functions for string conversions.
-#include "internal/fs.hpp"
-#else
-// The <codecvt> header has been deprecated in C++17; however, there's no real replacement
-// (excluding third-party libraries); hence, for now we just disable the deprecation warnings (only here).
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include <codecvt>
-using convert_type = std::codecvt_utf8< wchar_t >;
-#endif
 #endif
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <locale>
 #include <string>
 
 namespace bit7z {
@@ -107,7 +94,6 @@ void toUtf8( char32_t codepoint, std::string& result ) {
         result += "\xEF\xBF\xBD";
     }
 }
-// NOLINTEND(*-magic-numbers)
 
 BIT7Z_ALWAYS_INLINE
 auto decodeCodepoint( const wchar_t* wideString, std::size_t size, std::size_t& index ) noexcept -> char32_t {
@@ -137,6 +123,88 @@ auto decodeCodepoint( const wchar_t* wideString, std::size_t size, std::size_t& 
     // Invalid code point, use replacement character U+FFFD.
     return kReplacementChar;
 }
+
+BIT7Z_ALWAYS_INLINE
+void toUtf16( char32_t codepoint, std::wstring& result ) {
+    if ( codepoint <= 0xFFFFu ) {
+        result.push_back( static_cast< wchar_t >( codepoint ) );
+    } else {
+        codepoint -= 0x10000u;
+        result.push_back( static_cast< wchar_t >( ( codepoint >> kUtf16SurrogateShift ) + kHighStart ) );
+        result.push_back( static_cast< wchar_t >( ( codepoint & 0x3FFu ) + kLowStart ) );
+    }
+}
+
+BIT7Z_ALWAYS_INLINE
+constexpr auto isInvalidUtf8( std::uint8_t byte ) noexcept -> bool {
+    return ( byte == 0xC0u ) || ( byte == 0xC1u ) || ( byte >= 0xF5u );
+}
+
+constexpr std::array<std::uint8_t, 32> utfSizes = {
+    1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u,
+    0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 2u, 2u, 2u, 2u, 3u, 3u, 4u, 0u
+};
+
+BIT7Z_ALWAYS_INLINE
+constexpr auto isLeadingByte( std::uint8_t byte ) noexcept -> bool {
+    // byte <= 0x7Fu || ( byte & 0xE0u ) == 0xC0u || ( byte & 0xF0u ) == 0xE0u || ( byte & 0xF8u ) == 0xF0u;
+    return utfSizes[ byte >> 3u ] != 0;
+}
+
+constexpr std::array<std::uint8_t, 5> utfLeadMasks = {
+    0, 0, 0x1Fu, 0x0Fu, 0x07u
+};
+
+constexpr std::array<uint32_t, 5> utfMinValues = {
+    0, 0, 128, 2048, 65536
+};
+
+BIT7Z_ALWAYS_INLINE
+auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_iterator& end ) noexcept -> char32_t {
+    const auto leadingByte = static_cast< std::uint8_t >( *it++ );
+
+    if ( leadingByte <= 0x7Fu ) { // ASCII codepoint.
+        return static_cast< char32_t >( leadingByte );
+    }
+
+    // Here the UTF-8 byte sequence should have at least two bytes.
+
+    if ( it == end ) { // Truncated UTF-8 sequence after the leading byte.
+        return kReplacementChar;
+    }
+
+    const auto sequenceSize = utfSizes[ leadingByte >> 3u ]; // NOLINT(*-pro-bounds-constant-array-index)
+    const auto leadMask = utfLeadMasks[ sequenceSize ]; // NOLINT(*-pro-bounds-constant-array-index)
+
+    // Recreating the codepoint from the UTF-8 byte sequence.
+    std::uint32_t codepoint = ( leadingByte & leadMask );
+    std::uint8_t index = 1;
+    for (; it != end && index < sequenceSize; ++index ) {
+        const auto continuationByte = static_cast< std::uint8_t >( *it++ );
+        if ( isInvalidUtf8( continuationByte ) || isLeadingByte( continuationByte ) ) {
+            --it;
+            return kReplacementChar;
+        }
+        codepoint = ( codepoint << 6u ) + ( continuationByte & 0x3Fu );
+    }
+
+    if ( index != sequenceSize ) { // Truncated sequence.
+        return kReplacementChar;
+    }
+    if ( codepoint < utfMinValues[ sequenceSize ] ) { // Non-canonical encoding (overlong).
+        return kReplacementChar;
+    }
+    if ( isSurrogate( codepoint ) ) { // Lone surrogate.
+        return kReplacementChar;
+    }
+    if ( codepoint > 0x10FFFFu ) { // Invalid codepoint.
+        return kReplacementChar;
+    }
+
+    return static_cast< char32_t >( codepoint );
+}
+// NOLINTEND(*-magic-numbers)
+
 } // namespace
 #endif
 
@@ -201,17 +269,17 @@ auto widen( const std::string& narrowString ) -> std::wstring {
                          &result[ 0 ], // NOLINT(readability-container-data-pointer)
                          wideStringSize );
     return result;
-#elif !defined( BIT7Z_USE_STANDARD_FILESYSTEM )
-    return fs::detail::fromUtf8< std::wstring >( narrowString );
 #else
-    std::wstring_convert< convert_type, wchar_t > converter;
-    return converter.from_bytes( narrowString );
+    const std::size_t narrowSize = narrowString.size();
+    std::wstring result;
+    result.reserve( narrowSize );
+    for ( auto it = narrowString.cbegin(); it != narrowString.cend(); ) {
+        const char32_t utf32char = decodeCodepoint( it, narrowString.cend() );
+        toUtf16( utf32char, result );
+    }
+    return result;
 #endif
 }
-#endif
-
-#if !defined( _WIN32 ) && defined( BIT7Z_USE_STANDARD_FILESYSTEM )
-#pragma GCC diagnostic pop
 #endif
 
 } // namespace bit7z
