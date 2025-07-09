@@ -526,7 +526,20 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
                 std::make_tuple( "\U00010001", L"\xD800\xDC01" ),
                 std::make_tuple( "\U0010FFFE", L"\xDBFF\xDFFE" ),
                 std::make_tuple( "\U0010FFFF", L"\xDBFF\xDFFF" ),
-                // Codepoint outside Unicode range specification.
+            }
+        ) );
+
+        DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
+        }
+    }
+
+#ifndef _WIN32
+    SECTION( "Codepoints outside Unicode range specification" ) {
+        std::string testInput;
+        std::wstring testOutput;
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >(
+            {
                 std::make_tuple( "\xF4\x90\x80\x80", L"\uFFFD" ), // U+110000
                 std::make_tuple( "\xF4\x90\x80\x81", L"\uFFFD" ), // U+110001
                 std::make_tuple( "\xF7\xBF\xBF\xBF", L"\uFFFD" ), // U+001FFFFF
@@ -541,6 +554,7 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
         DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
             REQUIRE( widen( testInput ) == testOutput );
         }
+#endif
     }
 }
 
