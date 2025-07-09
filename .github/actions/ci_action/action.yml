@@ -28,6 +28,10 @@ inputs:
     description: 'Enable sanitizer for testing bit7z'
     required: false
     default: ON
+  cpm_cache:
+    description: 'Path to the CPM.cmake cache'
+    required: false
+    default: ${{ github.workspace }}/third_party
 
 runs:
   using: "composite"
@@ -50,7 +54,7 @@ runs:
       uses: actions/cache@v4
       id: cache-dependencies
       with:
-        path: ${{ github.workspace }}/third_party
+        path: ${{ inputs.cpm_cache }}
         key: ${{ runner.os }}-7z${{ inputs.sevenzip_version }}-third-party
 
     - name: Restore Ninja cache
@@ -84,7 +88,7 @@ runs:
         -DBIT7Z_USE_PCH=ON
         -DBIT7Z_ENABLE_SANITIZERS=${{ inputs.enable_sanitizers }}
         -DBIT7Z_7ZIP_VERSION="${{ inputs.sevenzip_version }}"
-        -DCPM_SOURCE_CACHE="${{ github.workspace }}/third_party"
+        -DCPM_SOURCE_CACHE="${{ inputs.cpm_cache }}"
         ${{ inputs.build_flags }}
         -S '${{ github.workspace }}'
 
