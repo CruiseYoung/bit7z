@@ -554,8 +554,8 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
         DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
             REQUIRE( widen( testInput ) == testOutput );
         }
-#endif
     }
+#endif
 }
 
 #endif
