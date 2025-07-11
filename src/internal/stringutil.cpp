@@ -140,8 +140,8 @@ void toUtf16( char32_t codepoint, std::wstring& result ) {
 }
 
 BIT7Z_ALWAYS_INLINE
-constexpr auto isInvalidUtf8( std::uint8_t byte ) noexcept -> bool {
-    return ( byte == 0xC0u ) || ( byte == 0xC1u ) || ( byte >= 0xF5u );
+constexpr auto isInvalidContinuationByte( std::uint8_t byte ) noexcept -> bool {
+    return ( byte & 0xC0 ) != 0x80;
 }
 
 constexpr std::array<std::uint8_t, 32> utfSizes = {
@@ -159,16 +159,11 @@ constexpr std::array<uint32_t, 5> utfMinValues = {
 };
 
 BIT7Z_ALWAYS_INLINE
-constexpr auto isOutOfRange( char32_t codepoint, std::uint8_t sequenceSize ) noexcept -> bool {
-    // Non-canonical encoding (overlong encoding or codepoint outside of Unicode specification).
+constexpr auto isOutOfRangeCodepoint( char32_t codepoint, std::uint8_t sequenceSize ) noexcept -> bool {
+    // Checking if the codepoint represents a non-canonical encoding
+    // (i.e., overlong encoding), or it is outside of Unicode specification.
     // NOLINTNEXTLINE(*-pro-bounds-constant-array-index)
     return codepoint < utfMinValues[ sequenceSize ] || codepoint > kMaxUnicodeCodepoint;
-}
-
-BIT7Z_ALWAYS_INLINE
-constexpr auto isLeadingByte( std::uint8_t byte ) noexcept -> bool {
-    // byte <= 0x7Fu || ( byte & 0xE0u ) == 0xC0u || ( byte & 0xF0u ) == 0xE0u || ( byte & 0xF8u ) == 0xF0u;
-    return byteSequenceSize( byte ) != 0;
 }
 
 constexpr std::array<std::uint8_t, 5> utfLeadMasks = {
@@ -189,7 +184,7 @@ auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_
         return kReplacementChar;
     }
 
-    const auto sequenceSize = byteSequenceSize( leadingByte ); // NOLINT(*-pro-bounds-constant-array-index)
+    const auto sequenceSize = byteSequenceSize( leadingByte );
     const auto leadMask = utfLeadMasks[ sequenceSize ]; // NOLINT(*-pro-bounds-constant-array-index)
 
     // Recreating the codepoint from the UTF-8 byte sequence.
@@ -197,7 +192,7 @@ auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_
     std::uint8_t index = 1;
     for (; it != end && index < sequenceSize; ++index ) {
         const auto continuationByte = static_cast< std::uint8_t >( *it++ );
-        if ( isInvalidUtf8( continuationByte ) || isLeadingByte( continuationByte ) ) {
+        if ( isInvalidContinuationByte( continuationByte ) ) {
             --it;
             return kReplacementChar;
         }
@@ -207,7 +202,7 @@ auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_
     if ( index != sequenceSize ) { // Truncated sequence.
         return kReplacementChar;
     }
-    if ( isOutOfRange( codepoint, sequenceSize ) ) {
+    if ( isOutOfRangeCodepoint( codepoint, sequenceSize ) ) {
         return kReplacementChar;
     }
     if ( isSurrogate( codepoint ) ) { // Lone surrogate.
