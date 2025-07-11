@@ -32,13 +32,18 @@ namespace bit7z {
 
 #if !defined( _WIN32 )
 namespace {
-constexpr char32_t kReplacementChar = 0xFFFDu;
+
+// UTF-16 Constants
 constexpr char32_t kHighStart = 0xD800u;
 constexpr char32_t kHighEnd = 0xDBFFu;
 constexpr char32_t kLowStart  = 0xDC00u;
 constexpr char32_t kLowEnd = 0xDFFFu;
-constexpr char32_t kUtf16SurrogateShift = 10u;
-constexpr char32_t kUtf16SurrogateOffset = 0x35FDC00u;
+constexpr char32_t kSurrogateShift = 10u;
+constexpr char32_t kSurrogateOffset = 0x35FDC00u;
+
+// Unicode constants
+constexpr char32_t kMaxUnicodeCodepoint = 0x10FFFFu;  // Maximum valid Unicode code-point
+constexpr char32_t kReplacementChar = 0xFFFDu;
 
 BIT7Z_ALWAYS_INLINE
 constexpr auto isHighSurrogate( char32_t codepoint ) noexcept -> bool {
@@ -62,7 +67,6 @@ void toUtf8( char32_t codepoint, std::string& result ) {
     constexpr char32_t kMaxOneByteUtf8 = 0x007Fu;      // U+0000 ... U+007F
     constexpr char32_t kMaxTwoBytesUtf8 = 0x07FFu;     // U+0080 ... U+07FF
     constexpr char32_t kMaxThreeBytesUtf8 = 0xFFFFu;   // U+0800 ... U+FFFF
-    constexpr char32_t kMaxFourBytesUtf8 = 0x10FFFFu;  // Maximum valid Unicode code-point
 
     if ( codepoint <= kMaxOneByteUtf8 ) {
         // 1-byte UTF-8: [U+0000, U+007F]
@@ -82,7 +86,7 @@ void toUtf8( char32_t codepoint, std::string& result ) {
         result.push_back( static_cast< char >( 0xE0u | ( ( codepoint >> 12u ) & 0x0Fu ) ) ); // 1110xxxx
         result.push_back( static_cast< char >( 0x80u | ( ( codepoint >> 6u ) & 0x3Fu ) ) );  // 10xxxxxx
         result.push_back( static_cast< char >( 0x80u | ( codepoint & 0x3Fu ) ) );           // 10xxxxxx
-    } else if ( codepoint <= kMaxFourBytesUtf8 ) {
+    } else if ( codepoint <= kMaxUnicodeCodepoint ) {
         // 4-bytes UTF-8: [U+10000, U+10FFFF]
         result.push_back( static_cast< char >( 0xF0u | ( ( codepoint >> 18u ) & 0x07u ) ) ); // 11110xxx
         result.push_back( static_cast< char >( 0x80u | ( ( codepoint >> 12u ) & 0x3Fu ) ) ); // 10xxxxxx
@@ -115,7 +119,7 @@ auto decodeCodepoint( const wchar_t* wideString, std::size_t size, std::size_t& 
             // codepoint = (high << 10u) - (0xD800 << 10u) + (low - 0xDC00) + 0x10000;
             // codepoint = (high << 10u) + low + (-(0xD800 << 10u) - 0xDC00 + 0x10000);
             // codepoint = (high << 10u) + low - (0x3600000 + 0xDC00 - 0x10000);
-            return ( currentChar << kUtf16SurrogateShift ) + nextChar - kUtf16SurrogateOffset;
+            return ( currentChar << kSurrogateShift ) + nextChar - kSurrogateOffset;
         }
     }
 
@@ -130,7 +134,7 @@ void toUtf16( char32_t codepoint, std::wstring& result ) {
         result.push_back( static_cast< wchar_t >( codepoint ) );
     } else {
         codepoint -= 0x10000u;
-        result.push_back( static_cast< wchar_t >( ( codepoint >> kUtf16SurrogateShift ) + kHighStart ) );
+        result.push_back( static_cast< wchar_t >( ( codepoint >> kSurrogateShift ) + kHighStart ) );
         result.push_back( static_cast< wchar_t >( ( codepoint & 0x3FFu ) + kLowStart ) );
     }
 }
@@ -147,7 +151,18 @@ constexpr std::array<std::uint8_t, 32> utfSizes = {
 
 BIT7Z_ALWAYS_INLINE
 constexpr auto byteSequenceSize( std::uint8_t leadingByte ) noexcept -> std::uint8_t {
-    return utfSizes[ static_cast< std::uint8_t >( leadingByte >> 3u ) ];
+    return utfSizes[ static_cast< std::uint8_t >( leadingByte >> 3u ) ]; // NOLINT(*-pro-bounds-constant-array-index)
+}
+
+constexpr std::array<uint32_t, 5> utfMinValues = {
+    0, 0, 128, 2048, 65536
+};
+
+BIT7Z_ALWAYS_INLINE
+constexpr auto isOutOfRange( char32_t codepoint, std::uint8_t sequenceSize ) noexcept -> bool {
+    // Non-canonical encoding (overlong encoding or codepoint outside of Unicode specification).
+    // NOLINTNEXTLINE(*-pro-bounds-constant-array-index)
+    return codepoint < utfMinValues[ sequenceSize ] || codepoint > kMaxUnicodeCodepoint;
 }
 
 BIT7Z_ALWAYS_INLINE
@@ -158,10 +173,6 @@ constexpr auto isLeadingByte( std::uint8_t byte ) noexcept -> bool {
 
 constexpr std::array<std::uint8_t, 5> utfLeadMasks = {
     0, 0, 0x1Fu, 0x0Fu, 0x07u
-};
-
-constexpr std::array<uint32_t, 5> utfMinValues = {
-    0, 0, 128, 2048, 65536
 };
 
 BIT7Z_ALWAYS_INLINE
@@ -196,16 +207,12 @@ auto decodeCodepoint( std::string::const_iterator& it, const std::string::const_
     if ( index != sequenceSize ) { // Truncated sequence.
         return kReplacementChar;
     }
-    if ( codepoint < utfMinValues[ sequenceSize ] ) { // Non-canonical encoding (overlong).
+    if ( isOutOfRange( codepoint, sequenceSize ) ) {
         return kReplacementChar;
     }
     if ( isSurrogate( codepoint ) ) { // Lone surrogate.
         return kReplacementChar;
     }
-    if ( codepoint > 0x10FFFFu ) { // Invalid codepoint.
-        return kReplacementChar;
-    }
-
     return static_cast< char32_t >( codepoint );
 }
 // NOLINTEND(*-magic-numbers)
