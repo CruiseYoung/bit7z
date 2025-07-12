@@ -99,7 +99,10 @@ TEST_CASE( "BitInputItem filesystem constructor should correctly read the metada
 
 TEST_CASE( "BitInputItem buffer constructor should set the correct metadata", "[bitinputitem]" ) {
     const std::string data = "Hello, World!";
-    const buffer_t buffer{ data.begin(), data.end() };
+    buffer_t buffer;
+    buffer.reserve( data.size() );
+    std::transform( data.cbegin(), data.cend(), std::back_inserter( buffer ),
+               [] ( char character ) -> byte_t { return static_cast< byte_t >( character ); });
     const fs::path path = BIT7Z_NATIVE_STRING( "path/to/buffer.txt" );
 
     const BitInputItem item{ buffer, path.string< tchar >() };
