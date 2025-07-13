@@ -131,6 +131,7 @@ extern const FilesystemItemInfo hidden;
 extern const FilesystemItemInfo readOnly;
 extern const FilesystemItemInfo regular;
 extern const FilesystemItemInfo symlink;
+extern const FilesystemItemInfo surrogatePairs;
 
 struct ExpectedItem {
     const FilesystemItemInfo& fileInfo;

@@ -423,15 +423,17 @@ TEMPLATE_TEST_CASE( "BitArchiveReader: Checking consistency between items() and 
     }
 }
 
-#ifndef FILE_ATTRIBUTE_WINDOWS_MASK
-constexpr auto FILE_ATTRIBUTE_WINDOWS_MASK = 0x07FFF;
-#endif
-
+namespace {
 void require_item_type( const BitArchiveReader& info,
                         const tstring& itemName,
+                        const std::u16string& utf16Name,
                         fs::file_type fileType,
                         std::uint32_t winAttributes,
                         SourceLocation location ) {
+#ifndef FILE_ATTRIBUTE_WINDOWS_MASK
+    constexpr auto FILE_ATTRIBUTE_WINDOWS_MASK = 0x07FFFu;
+#endif
+
     INFO( "Failed checking required item " << Catch::StringMaker< tstring >::convert( itemName ) )
     INFO( "  from " << location.file_name() << ":" << location.line() )
     auto iterator = info.find( itemName );
@@ -439,8 +441,22 @@ void require_item_type( const BitArchiveReader& info,
     REQUIRE( iterator->name() == itemName );
     REQUIRE( iterator->path() == itemName );
 
-    bool expectedDir = ( fileType == fs::file_type::directory );
-    bool expectedSymlink = ( fileType == fs::file_type::symlink );
+    const sevenzip_string utf16Path{ utf16Name.cbegin(), utf16Name.cend() };
+
+    // Note: the architectures supported by bit7z are all little endian.
+    // For some reason, 7-Zip uses UTF-16 for wide strings also on Unix systems (which usually use UTF-32).
+    const auto raw = iterator->rawPath();
+    REQUIRE( raw == utf16Path ); // UTF-16LE
+
+    const auto native = iterator->nativePath();
+#if defined( _WIN32 )
+    REQUIRE( native == utf16Path ); // UTF-16LE
+#else
+    REQUIRE( native == itemName ); // UTF-8
+#endif
+
+    const bool expectedDir = ( fileType == fs::file_type::directory );
+    const bool expectedSymlink = ( fileType == fs::file_type::symlink );
     REQUIRE( iterator->isDir() == expectedDir );
     REQUIRE( iterator->isSymLink() == expectedSymlink );
 
@@ -457,12 +473,13 @@ void require_item_type( const BitArchiveReader& info,
         REQUIRE( S_ISLNK( posix_attributes ) == expectedSymlink );
     }
 }
+} // namespace
 
 #define REQUIRE_ITEM_TYPE( info, item_name, file_type ) \
-    require_item_type( (info), BIT7Z_STRING( item_name ), (file_type), 0, BIT7Z_CURRENT_LOCATION )
+    require_item_type( (info), BIT7Z_STRING( item_name ), u##item_name, (file_type), 0, BIT7Z_CURRENT_LOCATION )
 
 #define REQUIRE_ITEM_TYPE_WITH_ATTRIBUTES( info, item_name, file_type, win_attributes ) \
-    require_item_type( (info), BIT7Z_STRING( item_name ), (file_type), (win_attributes), BIT7Z_CURRENT_LOCATION )
+    require_item_type( (info), BIT7Z_STRING( item_name ), u##item_name, (file_type), (win_attributes), BIT7Z_CURRENT_LOCATION )
 
 // NOLINTNEXTLINE(*-err58-cpp)
 TEMPLATE_TEST_CASE( "BitArchiveReader: Correctly reading file type inside archives",
@@ -514,6 +531,7 @@ TEMPLATE_TEST_CASE( "BitArchiveReader: Correctly reading archive items with Unic
         REQUIRE_ITEM_TYPE( info, "σύννεφα.jpg", fs::file_type::regular );
         REQUIRE_ITEM_TYPE( info, "юнікод.svg", fs::file_type::regular );
         REQUIRE_ITEM_TYPE( info, "ユニコード.pdf", fs::file_type::regular );
+        REQUIRE_ITEM_TYPE( info, "𤭢.txt", fs::file_type::regular );
     }
 }
 
@@ -531,6 +549,7 @@ TEMPLATE_TEST_CASE( "BitArchiveReader: Reading an archive with a Unicode file na
     REQUIRE_ITEM_TYPE( info, "σύννεφα.jpg", fs::file_type::regular );
     REQUIRE_ITEM_TYPE( info, "юнікод.svg", fs::file_type::regular );
     REQUIRE_ITEM_TYPE( info, "ユニコード.pdf", fs::file_type::regular );
+    REQUIRE_ITEM_TYPE( info, "𤭢.txt", fs::file_type::regular );
 }
 
 TEST_CASE( "BitArchiveReader: Reading an archive with a Unicode file name (bzip2)", "[bitarchivereader]" ) {
@@ -539,45 +558,6 @@ TEST_CASE( "BitArchiveReader: Reading an archive with a Unicode file name (bzip2
     const fs::path arcFileName{ BIT7Z_NATIVE_STRING( "クラウド.jpg.bz2" ) };
     const BitArchiveReader info( test::sevenzip_lib(), to_tstring( arcFileName ), BitFormat::BZip2 );
     REQUIRE_ITEM_TYPE( info, "クラウド.jpg", fs::file_type::regular );
-}
-
-TEST_CASE( "BitArchiveReader: Verifying the internal string encoding used by 7-Zip", "[bitarchivereader]" ) {
-    const TestDirectory testDir{ fs::path{ test_archives_dir } / "metadata" / "unicode" };
-
-    SECTION( "Archives with UTF-16 raw strings" ) {
-        const auto testFormat = GENERATE( as< TestInputFormat >(),
-                                  TestInputFormat{ "7z", BitFormat::SevenZip },
-                                  TestInputFormat{ "zip", BitFormat::Zip } );
-
-        DYNAMIC_SECTION( "Archive format: " << testFormat.extension ) {
-            const fs::path arcFileName = "string_encoding_check." + testFormat.extension;
-
-            const BitArchiveReader info( test::sevenzip_lib(), to_tstring( arcFileName ), testFormat.format );
-            const BitPropVariant itemName = info.itemProperty( 0, BitProperty::Path );
-            REQUIRE( itemName.isString() );
-
-            // Note: the architectures supported by bit7z are all little endian.
-            // For some reason, 7-Zip uses UTF-16 for wide strings also on Unix systems (which usually use UTF-32).
-            const auto raw = itemName.getRawString();
-            REQUIRE( raw == L"\xD852\xDF62.txt" ); // UTF-16LE
-
-            const auto native = itemName.getNativeString();
-#if defined( _WIN32 )
-            REQUIRE( native == L"\xD852\xDF62.txt" ); // UTF-16LE
-#else
-            REQUIRE( native == "\xF0\xA4\xAD\xA2.txt" ); // UTF-8
-#endif
-
-#if !defined( BIT7Z_USE_SYSTEM_CODEPAGE )
-            const auto str = itemName.getString();
-#   if defined( BIT7Z_USE_NATIVE_STRING )
-            REQUIRE( str == L"\xD852\xDF62.txt" ); // UTF-16LE
-#   else
-            REQUIRE( str == "\xF0\xA4\xAD\xA2.txt" ); // UTF-8
-#   endif
-#endif
-        }
-    }
 }
 #endif
 

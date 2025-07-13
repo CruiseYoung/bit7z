@@ -167,6 +167,13 @@ const FilesystemItemInfo symlink{ BIT7Z_STRING( "symlink" ),
                                   0x4A7103D4,
                                   0 };
 
+const FilesystemItemInfo surrogatePairs{ BIT7Z_STRING( "𤭢.txt" ),
+                                         BIT7Z_STRING( "txt" ),
+                                         fs::file_type::regular,
+                                         23,
+                                         0x51CA210E,
+                                         0x6EF9 };
+
 auto single_file_content() -> const ArchiveContent& {
     static const ArchiveContent instance{ 1, clouds.size, { { clouds, clouds.name, false } } };
     return instance;
@@ -233,7 +240,8 @@ auto unicode_content() -> const ArchiveContent& {
                                           { { italy, BIT7Z_NATIVE_STRING( "юнікод.svg" ), false },
                                             { loremIpsum, BIT7Z_NATIVE_STRING( "ユニコード.pdf" ), false },
                                             { clouds, BIT7Z_NATIVE_STRING( "σύννεφα.jpg" ), false },
-                                            { homework, BIT7Z_NATIVE_STRING( "¡Porque sí!.doc" ), false } } };
+                                            { homework, BIT7Z_NATIVE_STRING( "¡Porque sí!.doc" ), false },
+                                            { surrogatePairs, BIT7Z_NATIVE_STRING( "𤭢.txt" ), false } } };
     return instance;
 }
 

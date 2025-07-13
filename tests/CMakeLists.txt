@@ -20,6 +20,7 @@ set( PUBLIC_API_SOURCE_FILES
      src/test_bitarchiveeditor.cpp
      src/test_bitarchiveiteminfo.cpp
      src/test_bitarchivereader.cpp
+     src/test_bitarchivewriter.cpp
      src/test_biterror.cpp
      src/test_bitexception.cpp
      src/test_bitfilecompressor.cpp
@@ -57,7 +58,7 @@ target_include_directories( ${TESTS_BASE_TARGET} INTERFACE
 if( BIT7Z_TESTS_FILESYSTEM )
     CPMAddPackage( NAME bit7z_test_data
                    GITHUB_REPOSITORY "rikyoz/bit7z-test-data"
-                   VERSION 1.15
+                   VERSION 1.16
                    DOWNLOAD_ONLY YES
                    GIT_PROGRESS ON )
     if( bit7z_test_data_ADDED )
