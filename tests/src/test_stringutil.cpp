@@ -14,6 +14,7 @@
 
 #include <internal/stringutil.hpp>
 
+#include <iomanip>
 #include <string>
 #include <sstream>
 
@@ -22,11 +23,26 @@
 
 #define NARROWING_TEST_STR( str ) std::make_tuple( L##str, (str) )
 
-constexpr auto kMinPrintableAscii = 0x20u;
-constexpr auto kMaxPrintableAscii = 0x7Eu;
-constexpr auto kMaxAscii = 0x7Fu;
-
 namespace {
+
+template< typename CharT >
+using is_char = std::integral_constant< bool,
+                                        std::is_same< CharT, char >::value ||
+                                        std::is_same< CharT, char16_t >::value ||
+                                        std::is_same< CharT, char32_t >::value ||
+                                        std::is_same< CharT, wchar_t >::value >;
+
+template< typename CharT, typename = typename std::enable_if< is_char< CharT >::value >::type >
+struct AsciiTrait {
+    static constexpr auto kMinPrintableAscii = static_cast< CharT >( 0x20 );
+    static constexpr auto kMaxPrintableAscii = static_cast< CharT >( 0x7E );
+    static constexpr int kMaxAscii = 0x7F;
+
+    static constexpr auto isPrintableAscii( CharT character ) -> bool {
+        return kMinPrintableAscii <= character && character <= kMaxPrintableAscii;
+    }
+};
+
 BIT7Z_ALWAYS_INLINE
 constexpr auto toCodeunit( char character ) noexcept -> std::uint8_t {
     return static_cast< std::uint8_t >( character );
@@ -37,31 +53,31 @@ constexpr auto toCodeunit( wchar_t character ) noexcept -> std::uint32_t {
     return static_cast< std::uint32_t >( character );
 }
 
-template<typename CharT>
-void toHex( std::ostream& oss, CharT character, bool keepPrintableAscii = true ) {
-    if ( keepPrintableAscii && kMinPrintableAscii <= character && character <= kMaxPrintableAscii ) {
+template< typename CharT >
+auto toHex( CharT character, bool keepPrintableAscii = true ) -> std::string {
+    std::ostringstream oss;
+    if ( keepPrintableAscii && AsciiTrait< CharT >::isPrintableAscii( character ) ) {
         oss << static_cast< char >( character );
     } else {
-        oss << "\\x" << std::uppercase << +toCodeunit( character ) << std::nouppercase;
+        oss << "\\x" << std::hex << std::setw( 2 * sizeof( CharT ) ) << std::setfill( '0' ) << std::uppercase
+            << +toCodeunit( character );
     }
+    return oss.str();
 }
 
 template<typename CharT>
 auto toHexString( CharT character, bool keepPrintableAscii = true ) -> std::string {
-    std::ostringstream oss;
-    oss << std::hex;
-    toHex( oss, character, keepPrintableAscii );
-    return oss.str();
+    return toHex( character, keepPrintableAscii );
 }
 
 template<typename CharT>
-auto toHexString( const std::basic_string<CharT>& str, bool keepPrintableAscii = true ) -> std::string {
-    std::ostringstream oss;
-    oss << std::hex;
+auto toHexString( const std::basic_string< CharT >& str, bool keepPrintableAscii = true ) -> std::string {
+    std::string result;
+    result.reserve( str.size() );
     for ( const CharT character : str ) {
-        toHex( oss, character, keepPrintableAscii );
+        result += toHex( character, keepPrintableAscii );
     }
-    return oss.str();
+    return result;
 }
 }
 
@@ -73,7 +89,7 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
         REQUIRE( narrow( nullptr, 42 ).empty() );
     }
 
-    SECTION( "Converting wide strings with a lone surrogate (unencodable in UTF-8)" ) {
+    SECTION( "Converting wide strings with a lone surrogate (invalid in UTF-8)" ) {
         const std::wstring testInput = GENERATE(
             L"\xD800", // Lone high surrogates.
             L"\xD801",
@@ -96,7 +112,7 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
     }
 
 #ifndef _WIN32
-    SECTION( "Converting wide strings with multiple unencodable UTF-8" ) {
+    SECTION( "Converting wide strings with multiple UTF-16 codeunits invalid in UTF-8" ) {
         const std::wstring testInput = GENERATE(
             L"\xD83D\xD83D", // Two high surrogates.
             L"\xDE02\xDE02", // Two low surrogates.
@@ -104,10 +120,9 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
             L"\xDC00\xDC80\xDE02\xDFFF", // Only low surrogates.
             L"\xDE02\xD83D", // Low surrogate before a high surrogate.
             L"\xDFFF\xD800",
-            L"\x110000", // Out-of-range Unicode characters.
-            L"\x200000",
-            L"\x200000\x300000",
+            L"\x110000\x200000", // Multiple out-of-range Unicode characters.
             L"\x200000\x300000\x400000",
+            L"\x300000\x400000\x500000\x600000",
             L"\xD83D\x200000", // Mixed lone surrogate and out-of-range Unicode character.
             L"\uFFFD", // Replacement character.
             L"\uFFFD\uFFFD\uFFFD"
@@ -121,11 +136,12 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
 #endif
 
     SECTION( "Converting wide strings contain a single ASCII character" ) {
-        for ( wchar_t character = 0; character <= kMaxAscii; ++character ) {
+        for ( int ascii = 0; ascii <= AsciiTrait< wchar_t >::kMaxAscii; ++ascii ) {
+            const auto character = static_cast< wchar_t >( ascii );
             DYNAMIC_SECTION( "Converting L\"" << toHexString( character ) << "\" to narrow string" ) {
                 const auto output = narrow( &character, 1 );
                 REQUIRE( output.size() == 1 );
-                REQUIRE( output.front() == static_cast< char >( character ) );
+                REQUIRE( output.front() == static_cast< char >( ascii ) );
             }
         }
     }
@@ -135,20 +151,20 @@ TEST_CASE( "util: Narrowing wide string to std::string", "[stringutil][narrow]" 
         std::string testOutput;
         std::tie( testInput, testOutput ) = GENERATE( table< const wchar_t*, const char* >( {
             NARROWING_TEST_STR( "" ),
-            NARROWING_TEST_STR( "h" ),
             NARROWING_TEST_STR( "Hello, World!" ),
             NARROWING_TEST_STR( "supercalifragilistichespiralidoso" ),
             NARROWING_TEST_STR( "ABC" ),
             NARROWING_TEST_STR( "perché" ),
             NARROWING_TEST_STR( "κόσμε" ),
-            NARROWING_TEST_STR( "\u0080" ),
-            NARROWING_TEST_STR( "\u0800" ), // U+0800
+            NARROWING_TEST_STR( "\u2010" ), // Hyphen ‐
             NARROWING_TEST_STR( "\u4E08" ), // 丈
-            NARROWING_TEST_STR( "\U00010000" ),
             NARROWING_TEST_STR( "\u4E16\u754C" ), // 世界
+            NARROWING_TEST_STR( "\uE000" ),
+            NARROWING_TEST_STR( "\uFFFD" ), // Replacement character U+FFFD
             NARROWING_TEST_STR( "\u30e1\u30bf\u30eb\u30ac\u30eb\u30eb\u30e2\u30f3" ), // メタルガルルモン
+            // Long string with mixed characters (no UTF-16 surrogates in input string).
             NARROWING_TEST_STR( "English, \u65E5\u672C\u8A9E, \uD55C\uAD6D\uC5B4, "
-                                "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" ) // Long string with mixed characters.
+                                "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" )
         } ) );
 
         DYNAMIC_SECTION( "Converting L\"" << toHexString( testInput ) << "\" to narrow string" ) {
@@ -255,7 +271,7 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
     using std::make_tuple;
 
 #ifndef _WIN32
-    SECTION( "UTF-8 strings containing byte sequences encoding UTF-16 surrogates are invalid" ) {
+    SECTION( "Converting UTF-8 strings containing byte sequences encoding UTF-16 surrogates (invalid in UTF-8)" ) {
         const std::string testInput = GENERATE(
             "\xED\xA0\x80", // Lone high surrogates (invalid both in UTF-8 and UTF-16).
             "\xED\xA0\x81",
@@ -355,9 +371,14 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
             // Invalid leading byte.
             std::make_tuple( "\xF5\x41", L"\uFFFD\x41" ),
             // Invalid surrogate at the start of the string.
-            std::make_tuple( "\xED\xAA\x80""A\xC3\xA9", L"\uFFFD""A\xE9" ),
+            std::make_tuple( "\xED\xAA\x80""A\xC3\xA9", L"\uFFFD" L"A\xE9" ),
+            std::make_tuple( "\xEF\xBF\xBD""A\xC3\xA9", L"\uFFFD" L"A\xE9" ),
             // Invalid surrogate at the end of the string.
-            std::make_tuple( "\xC3\xA9""A\xED\xAA\x80", L"\xE9""A\uFFFD" ),
+            std::make_tuple( "\xC3\xA9""A\xED\xAA\x80", L"\xE9" L"A\uFFFD" ),
+            std::make_tuple( "\xC3\xA9""A\xEF\xBF\xBD", L"\xE9" L"A\uFFFD" ),
+            // Invalid surrogate in the middle of the string.
+            std::make_tuple( "ABC\xEF\xBF\xBD""DEF", L"ABC\uFFFD" L"DEF" ),
+            std::make_tuple( "ABC\xEF\xBF\xBD""DEF", L"ABC\uFFFD" L"DEF" ),
         } ) );
 
         DYNAMIC_SECTION( "Converting \"" << toHexString( testInput, false ) << "\" to wide string" ) {
@@ -542,12 +563,23 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
     }
 #endif
 
-    SECTION( "Valid UTF-8 strings" ) {
+    SECTION( "Converting UTF-8 strings contain a single ASCII character" ) {
+        for ( int ascii = 0; ascii <= AsciiTrait< char >::kMaxAscii; ++ascii ) {
+            const auto character = static_cast< char >( ascii );
+            DYNAMIC_SECTION( "Converting \"" << toHexString( character ) << "\" to wide string" ) {
+                const std::string input( 1u, character );
+                const auto output = widen( input );
+                REQUIRE( output.size() == 1 );
+                REQUIRE( output.front() == static_cast< wchar_t >( ascii ) );
+            }
+        }
+    }
+
+    SECTION( "Converting UTF-8 strings to wide strings" ) {
         std::string testInput;
         std::wstring testOutput;
         std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >( {
             WIDENING_TEST_STR( "" ),
-            WIDENING_TEST_STR( "h" ),
             WIDENING_TEST_STR( "Hello, World!" ),
             WIDENING_TEST_STR( "supercalifragilistichespiralidoso" ),
             WIDENING_TEST_STR( "ABC" ),
@@ -559,10 +591,9 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
             WIDENING_TEST_STR( "\uE000" ),
             WIDENING_TEST_STR( "\uFFFD" ), // Replacement character U+FFFD
             WIDENING_TEST_STR( "\u30e1\u30bf\u30eb\u30ac\u30eb\u30eb\u30e2\u30f3" ), // メタルガルルモン
-            std::make_tuple( "A\u00E9\u4E2D\U0001F602", L"A\u00E9\u4E2D\xD83D\xDE02" ), // Aé中😂
-            std::make_tuple( "Hello \u4E16\u754C \U0001F60A!", L"Hello \u4E16\u754C \xD83D\xDE0A!" ), // Hello 世界 😊!
-            std::make_tuple( "\u00A1\u00A7\u00A9\u00AE\u2122\U0001D11E\u20AC\u00A3\u00A5\u00BB\u00BF", // ¡§©®™𝄞€£¥»¿
-                             L"\u00A1\u00A7\u00A9\u00AE\u2122\xD834\xDD1E\u20AC\u00A3\u00A5\u00BB\u00BF" )
+            // Long string with mixed characters (no UTF-16 surrogates in output string).
+            WIDENING_TEST_STR( "English, \u65E5\u672C\u8A9E, \uD55C\uAD6D\uC5B4, "
+                               "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" )
         } ) );
 
         DYNAMIC_SECTION( "Converting \"" << toHexString( testInput ) << "\" to wide string" ) {
@@ -570,13 +601,28 @@ TEST_CASE( "util: Widening narrow string to std::wstring", "[stringutil][widen]"
         }
     }
 
-    SECTION( "Converting UTF-8 strings contain a single ASCII character" ) {
-        for ( char character = 0; character <= kMaxAscii; ++character ) {
-            DYNAMIC_SECTION( "Converting L\"" << toHexString( character ) << "\" to narrow string" ) {
-                const auto output = widen( std::string( 1u, character ) );
-                REQUIRE( output.size() == 1 );
-                REQUIRE( output.front() == static_cast< wchar_t >( character ) );
-            }
+    SECTION( "Converting UTF-8 strings to wide strings containing UTF-16 surrogates" ) {
+        std::string testInput;
+        std::wstring testOutput;
+        std::tie( testInput, testOutput ) = GENERATE( table< const char*, const wchar_t* >( {
+            // U+10042 = 𐁂
+            std::make_tuple( "\xF0\x90\x81\x82", L"\xD800\xDC42" ),
+            // U+1F602 = 😂
+            std::make_tuple( "\xF0\x9F\x98\x82", L"\xD83D\xDE02" ),
+            // U+24B62 = 𤭢
+            std::make_tuple( "\xF0\xA4\xAD\xA2", L"\xD852\xDF62" ),
+            // Mixed characters: Aé中😂
+            std::make_tuple( "A\xC3\xA9\xE4\xB8\xAD\xF0\x9F\x98\x82", L"A\x00E9\x4E2D\xD83D\xDE02" ),
+            // Mixed characters: Hello 世界 😊!
+            std::make_tuple( "Hello \xE4\xB8\x96\xE7\x95\x8C \xF0\x9F\x98\x8A!", L"Hello \x4E16\x754C \xD83D\xDE0A!" ),
+            // Mixed special characters: ¡§©®™𝄞€£¥»¿
+            std::make_tuple( "\xC2\xA1\xC2\xA7\xC2\xA9\xC2\xAE\xE2\x84\xA2\xF0\x9D\x84"
+                             "\x9E\xE2\x82\xAC\xC2\xA3\xC2\xA5\xC2\xBB\xC2\xBF",
+                             L"\xA1\xA7\xA9\xAE\x2122\xD834\xDD1E\x20AC\xA3\xA5\xBB\xBF" )
+        } ) );
+
+        DYNAMIC_SECTION( "Converting L\"" << toHexString( testInput ) << "\" to narrow string" ) {
+            REQUIRE( widen( testInput ) == testOutput );
         }
     }
 
