@@ -147,13 +147,13 @@ BitInputItem::BitInputItem( const fs::path& itemPath, SymlinkPolicy symlinkPolic
 BitInputItem::BitInputItem( const fs::path& itemPath, const fs::path& inArchivePath, SymlinkPolicy symlinkPolicy )
     : mProperties{ fileProperties( itemPath, symlinkPolicy ) },
       mPath{ itemPath.native() },
-      mInArchivePath{ path_to_wide_string( !inArchivePath.empty() ? inArchivePath : in_archive_path( itemPath ) ) },
+      mInArchivePath{ path_to_sevenzip_string( !inArchivePath.empty() ? inArchivePath : in_archive_path( itemPath ) ) },
       mFilesystemItem{ symlinkPolicy } {}
 
 BitInputItem::BitInputItem( const fs::path& searchPath, const fs::directory_entry& entry, SymlinkPolicy symlinkPolicy )
     : mProperties{ fileProperties( entry.path(), symlinkPolicy ) },
       mPath{ entry.path().native() },
-      mInArchivePath{ path_to_wide_string( in_archive_path( entry.path(), searchPath ) ) },
+      mInArchivePath{ path_to_sevenzip_string( in_archive_path( entry.path(), searchPath ) ) },
       mFilesystemItem{ symlinkPolicy } {}
 
 BitInputItem::BitInputItem( const buffer_t& buffer, const tstring& path )

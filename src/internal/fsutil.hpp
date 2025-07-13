@@ -81,14 +81,14 @@ inline auto path_to_tstring( const fs::path& path ) -> tstring {
 #endif
 }
 
-inline auto path_to_wide_string( const fs::path& path ) -> std::wstring {
-#if defined( _MSC_VER ) || !defined( BIT7Z_USE_STANDARD_FILESYSTEM )
-    return path.wstring();
+inline auto path_to_sevenzip_string( const fs::path& path ) -> std::wstring {
+#if defined( _WIN32 )
+    return path.native();
 #else
     /* On some compilers and platforms (e.g., GCC before v12.3),
-     * the direct conversion of the fs::path to wstring might throw an exception due to unicode characters.
-     * So we simply convert to tstring, and then widen it if necessary. */
-    return WIDEN( path.string< tchar >() );
+     * the direct conversion of the fs::path to wstring might throw an exception due to Unicode characters.
+     * So we simply convert to string, and then widen it if necessary. */
+    return widen( path.native() );
 #endif
 }
 
@@ -252,7 +252,7 @@ inline auto sevenzip_string_to_path( const sevenzip_string& str ) -> fs::path {
         result = filesystem::fsutil::format_long_path( result );
     }
     return result;
-#elif defined( _WIN32 ) || !defined( BIT7Z_USE_STANDARD_FILESYSTEM )
+#elif defined( _WIN32 )
     return str;
 #else
     return narrow( str.data(), str.size() );

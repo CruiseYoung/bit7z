@@ -208,7 +208,7 @@ auto BitInputArchive::itemProperty( std::uint32_t index, BitProperty property ) 
             if ( *mDetectedFormat != BitFormat::Split && itemPath.extension() == ".001" ) {
                 itemPath = itemPath.stem();
             }
-            itemProperty = path_to_wide_string( itemPath.stem() );
+            itemProperty = path_to_sevenzip_string( itemPath.stem() );
         }
     }
     return itemProperty;

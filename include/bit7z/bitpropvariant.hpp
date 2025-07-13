@@ -183,14 +183,14 @@ struct BitPropVariant final : public PROPVARIANT {
          *
          * @param value the null-terminated C wide string value of the BitPropVariant
          */
-        explicit BitPropVariant( const wchar_t* value );
+        explicit BitPropVariant( const sevenzip_string::value_type* value );
 
         /**
-         * @brief Constructs a string BitPropVariant from a wstring
+         * @brief Constructs a string BitPropVariant from a sevenzip_string
          *
-         * @param value the wstring value of the BitPropVariant
+         * @param value the sevenzip_string value of the BitPropVariant
          */
-        explicit BitPropVariant( const std::wstring& value );
+        explicit BitPropVariant( const sevenzip_string& value );
 
         /**
          * @brief Constructs an 8-bit unsigned integer BitPropVariant
