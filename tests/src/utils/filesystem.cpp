@@ -58,6 +58,13 @@ const FilesystemItemInfo noext{ BIT7Z_STRING( "noext" ),
                                 0xDE536DF9,
                                 0xEB1D };
 
+const FilesystemItemInfo greek{ BIT7Z_STRING( "σαράντα δύο.txt" ),
+                                BIT7Z_STRING( "txt" ),
+                                fs::file_type::regular,
+                                33,
+                                0x4AD1B113,
+                                0xACD8 };
+
 const FilesystemItemInfo dotFolder{ BIT7Z_STRING( "dot.folder" ),
                                     BIT7Z_STRING( "" ),
                                     fs::file_type::directory,

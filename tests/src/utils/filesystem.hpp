@@ -116,6 +116,7 @@ struct FilesystemItemInfo {
 extern const FilesystemItemInfo italy;
 extern const FilesystemItemInfo loremIpsum;
 extern const FilesystemItemInfo noext;
+extern const FilesystemItemInfo greek;
 extern const FilesystemItemInfo dotFolder;
 extern const FilesystemItemInfo helloJson;
 extern const FilesystemItemInfo emptyFolder;
