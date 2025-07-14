@@ -36,11 +36,21 @@ TEST_CASE( "BitArchiveWriter: TODO", "[bitarchivewriter]" ) {
 TEST_CASE( "BitArchiveWriter: Creating an archive containing files with Unicode names", "[bitarchivewriter]" ) {
     static const TestDirectory testDir{ test_filesystem_dir };
 
+
+#if defined( BIT7Z_7ZIP_VERSION_MAJOR ) && BIT7Z_7ZIP_VERSION_MAJOR >= 24
     const auto testFormat = GENERATE( as< TestOutputFormat >(),
                                       TestOutputFormat{ "7z", BitFormat::SevenZip },
                                       TestOutputFormat{ "tar", BitFormat::Tar },
                                       TestOutputFormat{ "wim", BitFormat::Wim },
                                       TestOutputFormat{ "zip", BitFormat::Zip } );
+#else
+    const auto testFormat = GENERATE( as< TestOutputFormat >(),
+                                      TestOutputFormat{ "7z", BitFormat::SevenZip },
+                                      TestOutputFormat{ "tar", BitFormat::Tar },
+                                      TestOutputFormat{ "wim", BitFormat::Wim } );
+#endif
+
+
 
     DYNAMIC_SECTION( "Archive format: " << testFormat.extension ) {
         constexpr auto renamedName = BIT7Z_STRING( "𤭢.svg" );

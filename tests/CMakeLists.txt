@@ -85,6 +85,13 @@ if( BIT7Z_TESTS_FILESYSTEM )
     endif()
 endif()
 
+string( REPLACE "." ";" VERSION_LIST ${BIT7Z_7ZIP_VERSION} )
+list( GET VERSION_LIST 0 BIT7Z_7ZIP_VERSION_MAJOR )
+list( GET VERSION_LIST 1 BIT7Z_7ZIP_VERSION_MINOR )
+target_compile_definitions( ${TESTS_BASE_TARGET} INTERFACE
+                            BIT7Z_7ZIP_VERSION_MAJOR=${BIT7Z_7ZIP_VERSION_MAJOR}
+                            BIT7Z_7ZIP_VERSION_MINOR=${BIT7Z_7ZIP_VERSION_MINOR} )
+
 set( BIT7Z_TESTS_7Z_LIBRARY_PATH "" CACHE STRING "The path of the 7-Zip library to be used for running the tests" )
 if( NOT BIT7Z_TESTS_7Z_LIBRARY_PATH STREQUAL "" )
     message( STATUS "Use custom 7-zip library for tests: ${BIT7Z_TESTS_7Z_LIBRARY_PATH}" )
