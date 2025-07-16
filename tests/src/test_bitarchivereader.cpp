@@ -30,6 +30,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <type_traits>
 
@@ -558,6 +559,34 @@ TEST_CASE( "BitArchiveReader: Reading an archive with a Unicode file name (bzip2
     const fs::path arcFileName{ BIT7Z_NATIVE_STRING( "クラウド.jpg.bz2" ) };
     const BitArchiveReader info( test::sevenzip_lib(), to_tstring( arcFileName ), BitFormat::BZip2 );
     REQUIRE_ITEM_TYPE( info, "クラウド.jpg", fs::file_type::regular );
+}
+
+// NOLINTNEXTLINE(*-err58-cpp)
+TEMPLATE_TEST_CASE( "BitArchiveReader: Reading an archive with a symbolic link pointing to an item with a Unicode name",
+                    "[bitarchivereader]", tstring, buffer_t, stream_t ) {
+    const TestDirectory testDir{ fs::path{ test_archives_dir } / "metadata" / "unicode" };
+
+    const auto testFormat = GENERATE( as< TestInputFormat >(),
+                                      TestInputFormat{ "7z", BitFormat::SevenZip },
+                                      TestInputFormat{ "tar", BitFormat::Tar },
+                                      TestInputFormat{ "wim", BitFormat::Wim },
+                                      TestInputFormat{ "zip", BitFormat::Zip } );
+
+    DYNAMIC_SECTION( "Archive format: " << testFormat.extension ) {
+        const fs::path arcFileName = "symlink." + testFormat.extension;
+
+        TestType inputArchive{};
+        getInputArchive( arcFileName, inputArchive );
+        const BitArchiveReader info( test::sevenzip_lib(), inputArchive, testFormat.format );
+        REQUIRE_ITEM_TYPE( info, "𤭢.svg", fs::file_type::regular );
+        REQUIRE_ITEM_TYPE( info, "italy.svg", fs::file_type::symlink );
+
+        const auto unicodeSymlink = info.find( BIT7Z_STRING( "italy.svg" ) );
+
+        buffer_t buffer;
+        info.extractTo( buffer, unicodeSymlink->index() );
+        REQUIRE( std::memcmp( buffer.data(), "\xF0\xA4\xAD\xA2.svg", buffer.size() ) == 0 );
+    }
 }
 #endif
 
