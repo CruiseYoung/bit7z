@@ -265,9 +265,6 @@ class Optional final : OptionalBase< T > {
         OptionalStorage<T> mStorage;
 };
 
-static_assert(std::is_trivially_destructible<Optional<int>>::value,
-              "Optional<T> doesn't respect T's trivially destructible property");
-
 } // namespace bit7z
 
 #endif //OPTIONAL_HPP

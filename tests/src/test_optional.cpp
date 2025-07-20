@@ -620,3 +620,24 @@ TEST_CASE( "Optional: assigning nullopt must destroy the previous value", "[opti
     // No unnecessary destructor call.
     REQUIRE( CustomType::destructionCount == 1 );
 }
+
+TEMPLATE_TEST_CASE( "Optional: compile time checks", "[optional]",
+                    std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t,
+                    std::int8_t, std::int16_t, std::int32_t, std::int64_t,
+                    bool, short, int, long,
+                    char, unsigned char, signed char, wchar_t,
+                    void*, int*,
+                    std::string, std::wstring, CustomType ) {
+    using OptionalType = Optional< TestType >;
+    constexpr auto expectedAlignment = alignof( TestType );
+    // Optional<T> must be aligned as T.
+    STATIC_REQUIRE( alignof( OptionalType ) == expectedAlignment );
+
+    // Optional<T> must pad with alignof(T) - 1 bytes.
+    constexpr auto expectedSize = sizeof( TestType ) + sizeof( bool ) + ( expectedAlignment - sizeof( bool ) );
+    STATIC_REQUIRE( sizeof( OptionalType ) == expectedSize );
+
+    // Optional<T> must respect T's trivially destructible property.
+    STATIC_REQUIRE( std::is_trivially_destructible< OptionalType >::value ==
+                    std::is_trivially_destructible< TestType >::value );
+}
