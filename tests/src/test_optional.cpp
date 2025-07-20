@@ -328,7 +328,11 @@ TEMPLATE_LIST_TEST_CASE( "Optional: constant Optional should be readable", "[opt
     REQUIRE( valueOpt.value() == Traits::init_value() );
 }
 
-constexpr struct throwing_tag_t {} throwing_tag{};
+struct throwing_tag_t {
+    constexpr explicit throwing_tag_t( int /*unused*/ ) noexcept {}
+};
+
+static constexpr throwing_tag_t throwing_tag{0};
 
 class CustomType final {
     public:
@@ -339,7 +343,7 @@ class CustomType final {
             ++constructionCount;
         }
 
-        explicit CustomType( throwing_tag_t ) : mValue{} {
+        explicit CustomType( throwing_tag_t /*unused*/ ) : mValue{} {
             throw std::runtime_error{ "ctor throws" };
         }
 
@@ -394,7 +398,7 @@ TEST_CASE( "Optional: lifecycle of an empty Optional", "[optional]" ) {
     CustomType::destructionCount = 0;
 
     {
-        Optional< CustomType > opt;
+        const Optional< CustomType > opt;
         REQUIRE( CustomType::constructionCount == 0 );
         REQUIRE( CustomType::destructionCount == 0 );
     }
@@ -428,7 +432,7 @@ TEST_CASE( "Optional: lifecycle after copy construction", "[optional]" ) {
         REQUIRE( CustomType::constructionCount == 1 );
         REQUIRE( CustomType::destructionCount == 0 );
 
-        Optional< CustomType > copiedOpt{ opt };
+        Optional< CustomType > copiedOpt{ opt }; // NOLINT(*-unnecessary-copy-initialization)
         REQUIRE( *copiedOpt == 10 );
         REQUIRE( copiedOpt.value() == 10 );
         REQUIRE( copiedOpt->customValue() == 10 );
