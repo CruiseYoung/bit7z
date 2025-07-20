@@ -23,7 +23,7 @@ using is_movable = std::integral_constant< bool, std::is_move_constructible<T>::
                                                  std::is_nothrow_move_constructible< T >::value >;
 
 struct nullopt_t {
-    constexpr explicit nullopt_t( int ) noexcept {}
+    constexpr explicit nullopt_t( int /*unused*/ ) noexcept {}
 };
 
 static constexpr nullopt_t nullopt{0};
@@ -47,7 +47,7 @@ union OptionalStorage { // NOLINT(*-special-member-functions)
 };
 
 template< typename T >
-union OptionalStorage<T, false> { // NOLINT(*-special-member-functions)
+union OptionalStorage< T, false > { // NOLINT(*-special-member-functions)
     byte_t mEmptyByte;
     T mValue;
 
@@ -226,10 +226,10 @@ class Optional final : OptionalBase< T > {
             }
         }
 
-        template <class... Args>
-        auto emplace(Args&&... args) -> T& {
+        template< typename... Args >
+        auto emplace( Args&&... args ) -> T& {
             reset();
-            new ( raw_data() ) T( std::forward<Args>( args )... );
+            new ( raw_data() ) T( std::forward< Args >( args )... );
             mEngaged = true;
             return stored_value();
         }
